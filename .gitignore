@@ -12,6 +12,7 @@
 
 # random
 /tobeignored
+/src/app/api/tools
 # testing
 /coverage
 
