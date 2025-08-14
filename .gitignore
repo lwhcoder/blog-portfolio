@@ -11,7 +11,7 @@
 !.yarn/versions
 
 # random
-/src/app/api/tools/*
+/src/app/api/tools
 # testing
 /coverage
 
