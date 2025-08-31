@@ -1,7 +1,7 @@
 "use client";
 
-import axios from "axios";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { BlogPost } from "@/types/blogpost";
 import { BlogCard } from "@/components/blog-card";
 import { Badge } from "@/components/ui/badge";
@@ -13,33 +13,39 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { Suspense } from "react";
 
-export default function BlogPageClient() {
-  const [posts, setPosts] = useState<BlogPost[]>([]);
-  const [activeTag, setActiveTag] = useState<string | null>(null);
+interface BlogPageClientProps {
+  initialPosts: BlogPost[];
+  initialActiveTag: string | null;
+}
+
+function BlogPageClientContent({ initialPosts, initialActiveTag }: BlogPageClientProps) {
+  const [posts] = useState<BlogPost[]>(initialPosts); // Use server-provided data
+  const [activeTag, setActiveTag] = useState<string | null>(initialActiveTag);
   const [sortOrder, setSortOrder] = useState<"latest" | "oldest">("latest");
+  const [isPending, startTransition] = useTransition();
+  
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
 
-  // Read tag from query param on mount and set activeTag
+  // Update URL when filters change using modern Next.js patterns
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const tagParam = params.get("tag");
-    if (tagParam) {
-      setActiveTag(tagParam);
-    }
-  }, []);
-
-  useEffect(() => {
-    async function fetchPosts() {
-      try {
-        const response = await axios.get("/api/blog");
-        setPosts(response.data);
-      } catch (error) {
-        console.error("Error loading posts:", error);
+    startTransition(() => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (activeTag) {
+        params.set("tag", activeTag);
+      } else {
+        params.delete("tag");
       }
-    }
-
-    fetchPosts();
-  }, []);
+      
+      const query = params.toString();
+      const url = query ? `${pathname}?${query}` : pathname;
+      
+      router.replace(url, { scroll: false });
+    });
+  }, [activeTag, router, searchParams, pathname]);
 
   const allTags = Array.from(new Set(posts.flatMap((post) => post.tags ?? [])));
 
@@ -52,13 +58,13 @@ export default function BlogPageClient() {
     });
 
   const toggleTag = (tag: string) => {
-    setActiveTag((prev) => (prev === tag ? null : tag));
+    startTransition(() => {
+      setActiveTag((prev) => (prev === tag ? null : tag));
+    });
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-10">
-      <h1 className="text-4xl font-bold mb-6 text-center">Blog</h1>
-
+    <>
       {(allTags.length > 0 || posts.length > 0) && (
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-10">
           <div className="flex flex-wrap gap-2 sm:justify-start justify-center">
@@ -68,11 +74,16 @@ export default function BlogPageClient() {
                 variant="secondary"
                 onClick={() => toggleTag(tag)}
                 className={cn(
-                  "cursor-pointer text-sm px-3 py-1 rounded-full transition-all",
+                  "cursor-pointer text-sm px-3 py-1 rounded-full transition-all duration-200",
+                  "hover:scale-105 active:scale-95",
                   activeTag === tag
-                    ? "bg-[#0f0] text-white hover:bg-[#009400]"
-                    : "bg-muted hover:bg-muted/80"
+                    ? "bg-primary text-primary-foreground hover:bg-primary/90 ring-2 ring-primary/20"
+                    : "bg-muted hover:bg-muted/80 hover:shadow-sm"
                 )}
+                style={{ 
+                  opacity: isPending ? 0.7 : 1,
+                  transition: "all 0.2s ease-in-out"
+                }}
               >
                 #{tag}
               </Badge>
@@ -82,14 +93,18 @@ export default function BlogPageClient() {
           <div className="w-40">
             <Select
               value={sortOrder}
-              onValueChange={(val) => setSortOrder(val as "latest" | "oldest")}
+              onValueChange={(val) => {
+                startTransition(() => {
+                  setSortOrder(val as "latest" | "oldest");
+                });
+              }}
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Sort by" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="latest">Latest</SelectItem>
-                <SelectItem value="oldest">Oldest</SelectItem>
+                <SelectItem value="latest">Latest First</SelectItem>
+                <SelectItem value="oldest">Oldest First</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -97,11 +112,26 @@ export default function BlogPageClient() {
       )}
 
       {filteredPosts.length === 0 ? (
-        <p className="text-center text-muted-foreground">
-          No posts found{activeTag ? ` for #${activeTag}` : ""}.
-        </p>
+        <div className="text-center py-12">
+          <p className="text-muted-foreground text-lg">
+            No posts found{activeTag ? ` for #${activeTag}` : ""}.
+          </p>
+          {activeTag && (
+            <button
+              onClick={() => toggleTag("")}
+              className="mt-4 text-primary hover:text-primary/80 underline"
+            >
+              Clear filter
+            </button>
+          )}
+        </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div 
+          className={cn(
+            "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 transition-opacity duration-300",
+            isPending && "opacity-50"
+          )}
+        >
           {filteredPosts.map((post) => (
             <BlogCard
               key={post.slug}
@@ -112,11 +142,23 @@ export default function BlogPageClient() {
               tags={post.tags}
               imageSrc={post.coverImageSrc}
               imageAlt={post.title}
-              className="min-h-full"
+              className="min-h-full hover:shadow-lg transition-all duration-300 hover:scale-[1.02]"
             />
           ))}
         </div>
       )}
-    </div>
+    </>
+  );
+}
+
+export default function BlogPageClient(props: BlogPageClientProps) {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    }>
+      <BlogPageClientContent {...props} />
+    </Suspense>
   );
 }
